@@ -1,9 +1,13 @@
-import { useState, useCallback } from 'react';
+import { useState, useCallback, useEffect } from 'react';
 import { Card } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog';
+import { Input } from '@/components/ui/input';
+import { Label } from '@/components/ui/label';
 import Icon from '@/components/ui/icon';
+import { useSocket } from '@/hooks/useSocket';
 
 // Chess piece definitions
 const INITIAL_BOARD = [
@@ -33,11 +37,58 @@ const TOP_PLAYERS = [
 ];
 
 export default function Index() {
+  // Socket connection
+  const {
+    isConnected,
+    playerInfo,
+    currentGame,
+    playerColor,
+    lastMove: socketLastMove,
+    gameEndInfo,
+    isSearching,
+    searchStatus,
+    gamesList,
+    register,
+    findMatch,
+    cancelSearch,
+    makeMove: socketMakeMove,
+    resign,
+    offerDraw,
+    spectateGame,
+    leaveGame,
+  } = useSocket();
+
+  // Local game state (for offline play)
   const [board, setBoard] = useState(INITIAL_BOARD);
   const [selectedSquare, setSelectedSquare] = useState<[number, number] | null>(null);
   const [currentPlayer, setCurrentPlayer] = useState<'white' | 'black'>('white');
   const [lastMove, setLastMove] = useState<[number, number, number, number] | null>(null);
   const [gameStatus, setGameStatus] = useState<'playing' | 'check' | 'checkmate' | 'draw'>('playing');
+
+  // UI state
+  const [showNameDialog, setShowNameDialog] = useState(false);
+  const [playerName, setPlayerName] = useState('');
+  const [activeTab, setActiveTab] = useState('game');
+
+  // Auto-show name dialog on first visit
+  useEffect(() => {
+    if (!playerInfo && !showNameDialog) {
+      setShowNameDialog(true);
+    }
+  }, [playerInfo, showNameDialog]);
+
+  // Update board from socket game state
+  useEffect(() => {
+    if (currentGame) {
+      setBoard(currentGame.board);
+      setCurrentPlayer(currentGame.currentPlayer);
+      
+      // Update last move from socket
+      if (socketLastMove) {
+        setLastMove([socketLastMove.from[0], socketLastMove.from[1], socketLastMove.to[0], socketLastMove.to[1]]);
+      }
+    }
+  }, [currentGame, socketLastMove]);
 
   const isWhitePiece = (piece: string | null): boolean => {
     return piece ? '♔♕♖♗♘♙'.includes(piece) : false;
@@ -67,35 +118,90 @@ export default function Index() {
   }, [board, currentPlayer]);
 
   const handleSquareClick = useCallback((row: number, col: number) => {
-    if (selectedSquare) {
-      const [selectedRow, selectedCol] = selectedSquare;
-      
-      if (selectedRow === row && selectedCol === col) {
-        setSelectedSquare(null);
-        return;
-      }
-
-      if (isValidMove(selectedRow, selectedCol, row, col)) {
-        const newBoard = board.map(r => [...r]);
-        const movingPiece = newBoard[selectedRow][selectedCol];
-        newBoard[row][col] = movingPiece;
-        newBoard[selectedRow][selectedCol] = null;
+    if (currentGame && playerColor) {
+      // Online game logic
+      if (selectedSquare) {
+        const [selectedRow, selectedCol] = selectedSquare;
         
-        setBoard(newBoard);
-        setLastMove([selectedRow, selectedCol, row, col]);
-        setCurrentPlayer(currentPlayer === 'white' ? 'black' : 'white');
+        if (selectedRow === row && selectedCol === col) {
+          setSelectedSquare(null);
+          return;
+        }
+
+        // Check if it's player's turn
+        if (currentGame.currentPlayer !== playerColor) {
+          setSelectedSquare(null);
+          return;
+        }
+
+        // Make move via socket
+        socketMakeMove(selectedRow, selectedCol, row, col);
+        setSelectedSquare(null);
+      } else {
+        const piece = board[row][col];
+        const canSelectPiece = piece && 
+          ((playerColor === 'white' && isWhitePiece(piece)) || 
+           (playerColor === 'black' && isBlackPiece(piece))) &&
+          currentGame.currentPlayer === playerColor;
+        
+        if (canSelectPiece) {
+          setSelectedSquare([row, col]);
+        }
       }
-      
-      setSelectedSquare(null);
     } else {
-      const piece = board[row][col];
-      if (piece && 
-          ((currentPlayer === 'white' && isWhitePiece(piece)) || 
-           (currentPlayer === 'black' && isBlackPiece(piece)))) {
-        setSelectedSquare([row, col]);
+      // Offline game logic
+      if (selectedSquare) {
+        const [selectedRow, selectedCol] = selectedSquare;
+        
+        if (selectedRow === row && selectedCol === col) {
+          setSelectedSquare(null);
+          return;
+        }
+
+        if (isValidMove(selectedRow, selectedCol, row, col)) {
+          const newBoard = board.map(r => [...r]);
+          const movingPiece = newBoard[selectedRow][selectedCol];
+          newBoard[row][col] = movingPiece;
+          newBoard[selectedRow][selectedCol] = null;
+          
+          setBoard(newBoard);
+          setLastMove([selectedRow, selectedCol, row, col]);
+          setCurrentPlayer(currentPlayer === 'white' ? 'black' : 'white');
+        }
+        
+        setSelectedSquare(null);
+      } else {
+        const piece = board[row][col];
+        if (piece && 
+            ((currentPlayer === 'white' && isWhitePiece(piece)) || 
+             (currentPlayer === 'black' && isBlackPiece(piece)))) {
+          setSelectedSquare([row, col]);
+        }
       }
     }
-  }, [selectedSquare, board, currentPlayer, isValidMove]);
+  }, [selectedSquare, board, currentPlayer, currentGame, playerColor, socketMakeMove, isValidMove]);
+
+  const formatTime = (milliseconds: number): string => {
+    const totalSeconds = Math.floor(milliseconds / 1000);
+    const minutes = Math.floor(totalSeconds / 60);
+    const seconds = totalSeconds % 60;
+    return `${minutes}:${seconds.toString().padStart(2, '0')}`;
+  };
+
+  const handleNameSubmit = () => {
+    if (playerName.trim()) {
+      register(playerName.trim());
+      setShowNameDialog(false);
+    }
+  };
+
+  const handleQuickMatch = () => {
+    if (isSearching) {
+      cancelSearch();
+    } else {
+      findMatch();
+    }
+  };
 
   const getSquareClass = (row: number, col: number): string => {
     let classes = 'chess-square ';
@@ -142,21 +248,43 @@ export default function Index() {
               развивайте свой рейтинг и становитесь мастером стратегии.
             </p>
             <div className="flex flex-col sm:flex-row gap-4 justify-center items-center animate-slide-up">
-              <Button size="lg" className="px-8 py-4 text-lg font-semibold hover:scale-105 transition-all">
-                <Icon name="Play" className="mr-2" />
-                Начать игру
-              </Button>
-              <Button variant="outline" size="lg" className="px-8 py-4 text-lg font-semibold hover:scale-105 transition-all">
-                <Icon name="Users" className="mr-2" />
-                Смотреть партии
-              </Button>
+              {playerInfo ? (
+                <>
+                  <Button 
+                    size="lg" 
+                    className="px-8 py-4 text-lg font-semibold hover:scale-105 transition-all"
+                    onClick={() => setActiveTab('lobby')}
+                  >
+                    <Icon name="Play" className="mr-2" />
+                    Начать игру
+                  </Button>
+                  <Button 
+                    variant="outline" 
+                    size="lg" 
+                    className="px-8 py-4 text-lg font-semibold hover:scale-105 transition-all"
+                    onClick={() => setActiveTab('lobby')}
+                  >
+                    <Icon name="Users" className="mr-2" />
+                    Смотреть партии
+                  </Button>
+                </>
+              ) : (
+                <Button 
+                  size="lg" 
+                  className="px-8 py-4 text-lg font-semibold hover:scale-105 transition-all"
+                  onClick={() => setShowNameDialog(true)}
+                >
+                  <Icon name="Play" className="mr-2" />
+                  Подключиться к игре
+                </Button>
+              )}
             </div>
           </div>
         </div>
       </section>
 
       <div className="max-w-7xl mx-auto px-4 pb-20">
-        <Tabs defaultValue="game" className="w-full">
+        <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
           <TabsList className="grid w-full grid-cols-4 mb-8 bg-card border border-border rounded-xl p-1">
             <TabsTrigger value="game" className="text-sm md:text-base font-medium">
               <Icon name="Grid3x3" className="mr-2 h-4 w-4" />
@@ -186,13 +314,25 @@ export default function Index() {
                     <div className="flex items-center gap-4">
                       <div className="flex items-center gap-2">
                         <div className="w-3 h-3 rounded-full bg-foreground"></div>
-                        <span className="font-semibold">Игрок_Черными</span>
-                        <Badge className="rating-badge bg-blue-500 text-white">1650</Badge>
+                        <span className="font-semibold">
+                          {currentGame && playerColor !== 'black' ? currentGame.black.name : 'Игрок_Черными'}
+                        </span>
+                        <Badge className="rating-badge bg-blue-500 text-white">
+                          {currentGame ? currentGame.black.rating : 1650}
+                        </Badge>
                       </div>
                       <div className="text-2xl font-mono bg-muted px-3 py-1 rounded-lg">
-                        15:00
+                        {currentGame ? formatTime(currentGame.blackTime) : '15:00'}
                       </div>
                     </div>
+                    {!isConnected && (
+                      <Badge variant="destructive">Офлайн режим</Badge>
+                    )}
+                    {currentGame && gameEndInfo && (
+                      <Badge className="bg-warning text-warning-foreground">
+                        {gameEndInfo.reason}
+                      </Badge>
+                    )}
                   </div>
 
                   <div className="chess-board animate-scale-in">
@@ -217,15 +357,20 @@ export default function Index() {
                     <div className="flex items-center gap-4">
                       <div className="flex items-center gap-2">
                         <div className="w-3 h-3 rounded-full bg-accent"></div>
-                        <span className="font-semibold">Вы (Белыми)</span>
-                        <Badge className="rating-badge bg-green-500 text-white">1587</Badge>
+                        <span className="font-semibold">
+                          {currentGame && playerColor !== 'white' ? currentGame.white.name : 
+                           playerInfo ? `${playerInfo.name} (Белыми)` : 'Вы (Белыми)'}
+                        </span>
+                        <Badge className="rating-badge bg-green-500 text-white">
+                          {currentGame ? currentGame.white.rating : (playerInfo?.rating || 1587)}
+                        </Badge>
                       </div>
                       <div className="text-2xl font-mono bg-muted px-3 py-1 rounded-lg">
-                        14:35
+                        {currentGame ? formatTime(currentGame.whiteTime) : '14:35'}
                       </div>
                     </div>
-                    <Badge className={`${currentPlayer === 'white' ? 'bg-accent' : 'bg-muted'} text-sm px-3 py-1`}>
-                      Ход: {currentPlayer === 'white' ? 'Белые' : 'Черные'}
+                    <Badge className={`${(currentGame ? currentGame.currentPlayer : currentPlayer) === 'white' ? 'bg-accent' : 'bg-muted'} text-sm px-3 py-1`}>
+                      Ход: {(currentGame ? currentGame.currentPlayer : currentPlayer) === 'white' ? 'Белые' : 'Черные'}
                     </Badge>
                   </div>
                 </Card>
@@ -249,11 +394,13 @@ export default function Index() {
                     </div>
                     <div className="flex justify-between">
                       <span className="text-muted-foreground">Зрителей:</span>
-                      <span className="font-medium">7</span>
+                      <span className="font-medium">{currentGame?.spectators || 0}</span>
                     </div>
                     <div className="flex justify-between">
                       <span className="text-muted-foreground">Статус:</span>
-                      <Badge className="bg-success text-success-foreground">В игре</Badge>
+                      <Badge className={currentGame ? 'bg-success text-success-foreground' : 'bg-muted text-muted-foreground'}>
+                        {currentGame ? 'В игре' : 'Офлайн'}
+                      </Badge>
                     </div>
                   </div>
                 </Card>
@@ -266,7 +413,7 @@ export default function Index() {
                   <div className="space-y-2 text-sm">
                     <div className="flex justify-between">
                       <span className="text-muted-foreground">Ходов сделано:</span>
-                      <span className="font-medium">24</span>
+                      <span className="font-medium">{currentGame?.moves.length || 0}</span>
                     </div>
                     <div className="flex justify-between">
                       <span className="text-muted-foreground">Взятых фигур:</span>
@@ -282,14 +429,35 @@ export default function Index() {
                 <Card className="stats-card">
                   <h3 className="font-heading text-xl font-semibold mb-4">Действия</h3>
                   <div className="space-y-3">
-                    <Button variant="outline" className="w-full">
-                      <Icon name="Flag" className="mr-2 h-4 w-4" />
-                      Предложить ничью
-                    </Button>
-                    <Button variant="destructive" className="w-full">
-                      <Icon name="X" className="mr-2 h-4 w-4" />
-                      Сдаться
-                    </Button>
+                    {currentGame && playerColor ? (
+                      <>
+                        <Button variant="outline" className="w-full" onClick={offerDraw}>
+                          <Icon name="Flag" className="mr-2 h-4 w-4" />
+                          Предложить ничью
+                        </Button>
+                        <Button variant="destructive" className="w-full" onClick={resign}>
+                          <Icon name="X" className="mr-2 h-4 w-4" />
+                          Сдаться
+                        </Button>
+                        {gameEndInfo && (
+                          <Button variant="outline" className="w-full" onClick={leaveGame}>
+                            <Icon name="Home" className="mr-2 h-4 w-4" />
+                            Вернуться в лобби
+                          </Button>
+                        )}
+                      </>
+                    ) : (
+                      <>
+                        <Button variant="outline" className="w-full" disabled>
+                          <Icon name="Flag" className="mr-2 h-4 w-4" />
+                          Предложить ничью
+                        </Button>
+                        <Button variant="destructive" className="w-full" disabled>
+                          <Icon name="X" className="mr-2 h-4 w-4" />
+                          Сдаться
+                        </Button>
+                      </>
+                    )}
                   </div>
                 </Card>
               </div>
@@ -309,7 +477,7 @@ export default function Index() {
                 </div>
 
                 <div className="space-y-4">
-                  {SAMPLE_GAMES.map((game) => (
+                  {gamesList.length > 0 ? gamesList.map((game) => (
                     <Card key={game.id} className="game-card">
                       <div className="flex items-center justify-between">
                         <div className="flex items-center gap-6">
@@ -375,10 +543,29 @@ export default function Index() {
                     Быстрая игра
                   </h3>
                   <div className="space-y-4">
-                    <Button className="w-full" size="lg">
-                      <Icon name="Play" className="mr-2" />
-                      Найти соперника
-                    </Button>
+                    {isConnected ? (
+                      <>
+                        <Button 
+                          className="w-full" 
+                          size="lg" 
+                          onClick={handleQuickMatch}
+                          disabled={!playerInfo}
+                        >
+                          <Icon name={isSearching ? "X" : "Play"} className="mr-2" />
+                          {isSearching ? 'Отменить поиск' : 'Найти соперника'}
+                        </Button>
+                        {searchStatus && (
+                          <div className="text-center text-sm text-muted-foreground animate-pulse">
+                            {searchStatus}
+                          </div>
+                        )}
+                      </>
+                    ) : (
+                      <Button className="w-full" size="lg" disabled>
+                        <Icon name="Wifi" className="mr-2" />
+                        Подключение...
+                      </Button>
+                    )}
                     <div className="text-center text-sm text-muted-foreground">
                       Средний рейтинг: 1650 ± 150
                     </div>
@@ -623,6 +810,50 @@ export default function Index() {
           </TabsContent>
         </Tabs>
       </div>
+
+      {/* Registration Dialog */}
+      <Dialog open={showNameDialog} onOpenChange={setShowNameDialog}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Подключение к Chess Master</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-4">
+            <div className="space-y-2">
+              <Label htmlFor="playerName">Ваше имя в игре</Label>
+              <Input
+                id="playerName"
+                value={playerName}
+                onChange={(e) => setPlayerName(e.target.value)}
+                placeholder="Например: Мастер_Шахмат"
+                onKeyPress={(e) => e.key === 'Enter' && handleNameSubmit()}
+              />
+            </div>
+            <div className="text-sm text-muted-foreground">
+              {isConnected ? (
+                <div className="flex items-center gap-2 text-success">
+                  <Icon name="CheckCircle" className="h-4 w-4" />
+                  Подключено к серверу
+                </div>
+              ) : (
+                <div className="flex items-center gap-2 text-muted-foreground">
+                  <Icon name="Loader2" className="h-4 w-4 animate-spin" />
+                  Подключение к серверу...
+                </div>
+              )}
+            </div>
+          </div>
+          <DialogFooter>
+            <Button 
+              onClick={handleNameSubmit} 
+              disabled={!playerName.trim() || !isConnected}
+              className="w-full"
+            >
+              <Icon name="Play" className="mr-2 h-4 w-4" />
+              Начать игру
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }
