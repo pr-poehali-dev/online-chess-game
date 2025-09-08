@@ -82,10 +82,21 @@ export const useSocket = () => {
   const [gameEndInfo, setGameEndInfo] = useState<{ result: string; reason: string } | null>(null);
 
   useEffect(() => {
-    // Connect to WebSocket server
-    const socket = io('ws://localhost:3001', {
+    // Connect to WebSocket server - auto-detect URL
+    const getSocketUrl = () => {
+      if (typeof window !== 'undefined') {
+        // Use current host for connection
+        const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+        const host = window.location.host;
+        return `${protocol}//${host}`;
+      }
+      return 'ws://localhost:3001'; // fallback for development
+    };
+
+    const socket = io(getSocketUrl(), {
       transports: ['websocket', 'polling'],
-      timeout: 5000,
+      timeout: 10000,
+      forceNew: true,
     });
 
     socketRef.current = socket;
