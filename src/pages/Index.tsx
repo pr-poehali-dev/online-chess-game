@@ -532,6 +532,61 @@ export default function Index() {
                         </div>
                       </div>
                     </Card>
+                  )) : SAMPLE_GAMES.map((game) => (
+                    <Card key={game.id} className="game-card">
+                      <div className="flex items-center justify-between">
+                        <div className="flex items-center gap-6">
+                          <div className="flex items-center gap-3">
+                            <div className="w-2 h-2 rounded-full bg-accent"></div>
+                            <div>
+                              <div className="flex items-center gap-2">
+                                <span className="font-semibold">{game.white}</span>
+                                <Badge className={`rating-badge ${getRatingColor(game.whiteRating)} text-white text-xs`}>
+                                  {game.whiteRating}
+                                </Badge>
+                              </div>
+                              <div className="text-sm text-muted-foreground">Белые</div>
+                            </div>
+                          </div>
+
+                          <div className="text-2xl font-bold text-muted-foreground">vs</div>
+
+                          <div className="flex items-center gap-3">
+                            <div className="w-2 h-2 rounded-full bg-foreground"></div>
+                            <div>
+                              <div className="flex items-center gap-2">
+                                <span className="font-semibold">{game.black}</span>
+                                {game.blackRating && (
+                                  <Badge className={`rating-badge ${getRatingColor(game.blackRating)} text-white text-xs`}>
+                                    {game.blackRating}
+                                  </Badge>
+                                )}
+                              </div>
+                              <div className="text-sm text-muted-foreground">Черные</div>
+                            </div>
+                          </div>
+                        </div>
+
+                        <div className="flex items-center gap-4">
+                          <div className="text-center">
+                            <div className="text-sm font-medium">{game.time}</div>
+                            <div className="text-xs text-muted-foreground">Контроль</div>
+                          </div>
+                          <Badge className={getStatusColor(game.status)}>
+                            {game.status}
+                          </Badge>
+                          {game.viewers > 0 && (
+                            <div className="flex items-center gap-1 text-sm text-muted-foreground">
+                              <Icon name="Eye" className="h-4 w-4" />
+                              {game.viewers}
+                            </div>
+                          )}
+                          <Button variant="outline" size="sm">
+                            {game.status === 'Играют' ? 'Смотреть' : 'Присоединиться'}
+                          </Button>
+                        </div>
+                      </div>
+                    </Card>
                   ))}
                 </div>
               </div>
